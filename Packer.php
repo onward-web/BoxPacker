@@ -190,7 +190,10 @@
 
             //For each item in the heavier box, try and move it to the lighter one
             foreach ($overWeightBoxItems as $oi => $overWeightBoxItem) {
-              if ($underWeightBox->getWeight() + $overWeightBoxItem->getWeight() > $targetWeight) {
+              $oldDifferenceFromTarget = abs($targetWeight - $underWeightBox->getWeight());
+              $newDifferenceFromTarget = abs($targetWeight - $underWeightBox->getWeight() + $overWeightBoxItem->getWeight());
+
+              if ($newDifferenceFromTarget > $oldDifferenceFromTarget) {
                 continue; //skip if moving this item would hinder rather than help weight distribution
               }
 
