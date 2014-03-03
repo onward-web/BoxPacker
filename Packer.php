@@ -239,65 +239,111 @@
     public function packBox(Box $aBox, ItemList $aItems) {
       $this->logger->log(LogLevel::DEBUG,  "evaluating box {$aBox->getReference()}");
 
-      $packedItems = new ItemList;
+      $packedItems = new ItemList();
       $remainingDepth = $aBox->getInnerDepth();
       $remainingWeight = $aBox->getMaxWeight() - $aBox->getEmptyWeight();
-      $remainingWidth = $aBox->getInnerWidth();
-      $remainingLength = $aBox->getInnerLength();
+
+      // Normalise box width/length so that length is always the longer side
+      $remainingWidth = min($aBox->getInnerWidth(), $aBox->getInnerLength());
+      $remainingLength = max($aBox->getInnerWidth(), $aBox->getInnerLength());
 
       $layerWidth = $layerLength = $layerDepth = 0;
+
       while(!$aItems->isEmpty()) {
 
+        // Get the next item to be packed, which will be the largest remaining item
         $itemToPack = $aItems->top();
 
-        if ($itemToPack->getDepth() > ($layerDepth ?: $remainingDepth) || $itemToPack->getWeight() > $remainingWeight) {
+        // Finish packing this box if not enough remaining depth/weight in the box
+        if ($itemToPack->getDepth() > $remainingDepth || $itemToPack->getWeight() > $remainingWeight) {
           break;
         }
 
-        $this->logger->log(LogLevel::DEBUG,  "evaluating item {$itemToPack->getDescription()}");
+        $this->logger->log(LogLevel::DEBUG,  "evaluating item {$itemToPack->getDescription()} ({$itemToPack->getWidth()} {$itemToPack->getLength()} {$itemToPack->getDepth()})");
         $this->logger->log(LogLevel::DEBUG,  "remaining width :{$remainingWidth}, length: {$remainingLength}, depth: {$remainingDepth}");
         $this->logger->log(LogLevel::DEBUG,  "layerWidth: {$layerWidth}, layerLength: {$layerLength}, layerDepth: {$layerDepth}");
 
-        $itemWidth = $itemToPack->getWidth();
-        $itemLength = $itemToPack->getLength();
+        // Normalise item width/length so that length is always the longer side
+        $itemWidth = min($itemToPack->getWidth(), $itemToPack->getLength());
+        $itemLength = max($itemToPack->getWidth(), $itemToPack->getLength());
 
-        $fitsSameGap = min($remainingWidth - $itemWidth, $remainingLength - $itemLength);
-        $fitsRotatedGap = min($remainingWidth - $itemLength, $remainingLength - $itemWidth);
+        // Calculations for fitting the item in the current orientation
+        $sameGapWidth = $remainingWidth - $itemWidth;
+        $sameGapLength = $remainingLength - $itemLength;
+        $sameGapMin = min($sameGapWidth, $sameGapLength);
+        $sameFits = $sameGapMin >= 0;
 
-        if ($fitsSameGap >= 0 || $fitsRotatedGap >= 0) {
+        // Calculations for fitting the item in the rotated orientation
+        $rotatedGapWidth = $remainingWidth - $itemLength;
+        $rotatedGapLength = $remainingLength - $itemWidth;
+        $rotatedGapMin = min($rotatedGapWidth, $rotatedGapLength);
+        $rotatedFits = $rotatedGapMin >= 0;
+
+        $this->logger->log(LogLevel::DEBUG,  "fits same gap: {$sameGapMin}");
+        $this->logger->log(LogLevel::DEBUG,  "fits rotated gap: {$rotatedGapMin}");
+
+        // Item fits this layer
+        if ($sameFits or $rotatedFits) {
 
           $packedItems->insert($aItems->extract());
           $remainingWeight -= $itemToPack->getWeight();
 
-          if ($fitsSameGap <= $fitsRotatedGap || $fitsRotatedGap < 0 ) {
+          // Current orientation is better if it has a smaller min gap, whilst fitting, or the item doesn't fit rotated
+          $sameBetter = (($sameFits and $sameGapMin <= $rotatedGapMin) or !$rotatedFits);
+
+          // Fits better unrotated
+          if ($sameBetter) {
             $this->logger->log(LogLevel::DEBUG,  "fits (better) unrotated");
-            $remainingLength -= $itemLength;
+
+            // Remove smallest gap from remaining area
+            if ($sameGapWidth <= $sameGapLength) {
+              $remainingLength -= $itemLength;
+            } else {
+              $remainingWidth -= $itemWidth;
+            }
+
+
             $layerWidth += $itemWidth;
             $layerLength += $itemLength;
           }
+
+          // Fits better rotated
           else {
             $this->logger->log(LogLevel::DEBUG,  "fits (better) rotated");
-            $remainingLength -= $itemWidth;
+
+            if ($rotatedGapWidth <= $rotatedGapLength) {
+              $remainingLength -= $itemWidth;
+            } else {
+              $remainingWidth -= $itemLength;
+            }
+
             $layerWidth += $itemLength;
             $layerLength += $itemWidth;
           }
-          $layerDepth = max($layerDepth, $itemToPack->getDepth()); //greater than 0, items will always be less deep
+
+          $layerDepth = max($layerDepth, $itemToPack->getDepth());
         }
+
+        // Item does not fit the current layer
         else {
+          // If it was an empty layer, item does not fit in box
           if (!$layerWidth) {
             $this->logger->log(LogLevel::DEBUG,  "doesn't fit on layer even when empty");
             break;
           }
 
-          $remainingWidth = min(floor($layerWidth * 1.1), $aBox->getInnerWidth());
-          $remainingLength = min(floor($layerLength * 1.1), $aBox->getInnerLength());
+          // Set things up for trying a new layer
+          $remainingWidth = $aBox->getInnerWidth();
+          $remainingLength = $aBox->getInnerLength();
           $remainingDepth -= $layerDepth;
 
           $layerWidth = $layerLength = $layerDepth = 0;
           $this->logger->log(LogLevel::DEBUG,  "doesn't fit, so starting next vertical layer");
         }
       }
+
       $this->logger->log(LogLevel::DEBUG,  "done with this box");
+
       return $packedItems;
     }
   }
